@@ -1,9 +1,8 @@
 # ==============================================================================
-#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER (V-FINAL - REQUESTS METHOD)
+#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER (V-FINAL - TRANSPARENT)
 #
-# This is the final, stable, full-featured build. It removes Selenium and
-# uses the lightweight 'requests' library to resolve Google News links,
-# ensuring reliability and speed on Streamlit Cloud.
+# This version adds detailed error logging and a summary of failed articles
+# to provide full transparency during the analysis process.
 # ==============================================================================
 
 import streamlit as st
@@ -16,7 +15,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 import feedparser
-import requests # The new library for resolving links
+import requests
 import spacy
 from newsapi.newsapi_client import NewsApiClient
 from newspaper import Article, Config
@@ -52,44 +51,32 @@ SMTP_PORT = 587
 # --- HELPER FUNCTIONS ---
 
 def fetch_from_google_rss(person_name, from_date, to_date):
-    urls_found = []
     try:
         query_terms = f'"{person_name}" after:{from_date.strftime("%Y-%m-%d")} before:{to_date.strftime("%Y-%m-%d")}'
         rss_url = f"https://news.google.com/rss/search?q={query_terms.replace(' ', '%20')}&hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
-        for entry in feed.entries:
-            urls_found.append(entry.get("link", ""))
-        return urls_found
+        return [entry.get("link", "") for entry in feed.entries]
     except Exception as e:
-        st.warning(f"Could not fetch from Google News RSS: {e}")
-        return []
+        st.warning(f"Could not fetch from Google News RSS: {e}"); return []
 
 def fetch_from_newsapi(api_client, person_name, from_date, to_date):
-    urls_found = []
     try:
         all_articles = api_client.get_everything(
             q=f'"{person_name}"', from_param=from_date.isoformat(), to=to_date.isoformat(),
             language='en', sort_by='relevancy', page_size=40
         )
-        for article in all_articles.get('articles', []):
-            urls_found.append(article['url'])
-        return urls_found
+        return [article['url'] for article in all_articles.get('articles', [])]
     except Exception as e:
-        st.warning(f"Could not fetch from NewsAPI: {e}")
-        return []
+        st.warning(f"Could not fetch from NewsAPI: {e}"); return []
 
-# THIS IS THE NEW, SELENIUM-FREE FUNCTION
 def resolve_google_news_url(google_url: str, session) -> str | None:
-    """Resolves a Google News redirect URL using the requests library."""
     try:
-        # Use the provided session to make the request
         response = session.get(google_url, timeout=15)
-        # The .url attribute holds the final URL after all redirects
         return response.url
     except requests.RequestException:
-        # On failure, we'll just skip this URL by returning None
         return None
 
+# THIS FUNCTION NOW INCLUDES DETAILED LOGGING
 def process_article(url, name_to_find):
     try:
         config = Config()
@@ -99,13 +86,17 @@ def process_article(url, name_to_find):
         article.download()
         article.parse()
         title = article.title if article.title else "Title Not Found"
-        if not article.text or len(article.text) < 200:
+        if not article.text or len(article.text) < 250:
+            # THIS IS OUR NEW LOGGING
+            st.warning(f"Failed: Text from {url} was too short or empty (likely a paywall, block, or non-article page).")
             return (None, None, None)
         full_text = article.text
         doc = nlp(full_text)
         found_sentences = [s.text.strip().replace('\n', ' ') for s in doc.sents if name_to_find.lower() in s.text.lower()]
         return (title, found_sentences, full_text)
-    except Exception:
+    except Exception as e:
+        # AND SO IS THIS
+        st.error(f"Failed: An error occurred processing {url}. Reason: {e}")
         return (None, None, None)
 
 # (GPT and Email functions remain unchanged)
@@ -168,14 +159,11 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     st.info(f"Found {len(google_urls)} potential links from Google News and {len(newsapi_urls)} from NewsAPI.")
 
     with st.spinner("Resolving Google News links..."):
-        # Create a single requests session to be more efficient
         with requests.Session() as session:
             session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'})
             resolved_google_urls = [resolve_google_news_url(url, session) for url in google_urls]
-        
-        valid_resolved_urls = [url for url in resolved_google_urls if url] # Filter out any that failed
-        st.info(f"Successfully resolved {len(valid_resolved_urls)} links from Google News.")
-
+        valid_resolved_urls = [url for url in resolved_google_urls if url]
+    
     final_urls_list = sorted(list(set(valid_resolved_urls + newsapi_urls)))
     
     if not final_urls_list:
@@ -184,14 +172,21 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     st.success(f"Found {len(final_urls_list)} unique, usable articles. Now analyzing...")
     
     results = {}
+    failed_urls = [] # A list to store the URLs that fail
     progress_bar = st.progress(0, text="Analyzing articles...")
     
+    st.markdown("---")
+    st.subheader("⚙️ Analysis Log")
+    st.info("This log will show which articles could not be processed and why.")
+
     for i, url in enumerate(final_urls_list):
         title, mentions, article_text = process_article(url, person_name)
         if article_text:
             summary = get_summary_from_gpt(article_text)
             sentiment = get_sentiment_from_gpt(person_name, mentions)
             results[url] = {'title': title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
+        else:
+            failed_urls.append(url) # Add the URL to our failed list
         progress_bar.progress((i + 1) / len(final_urls_list), text=f"Analyzing: {url[:80]}...")
     
     progress_bar.empty()
@@ -200,11 +195,20 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
 
     st.header("📊 Final Report", divider='rainbow')
     
-    if not results:
-        st.warning("No articles could be successfully analyzed.")
-    else:
+    if not results and not failed_urls:
+        st.warning("No articles could be analyzed.")
+    
+    # Display the new summary of failed articles
+    if failed_urls:
+        with st.expander(f"⚠️ Could not analyze {len(failed_urls)} articles (click to see why)"):
+            st.write("These articles were likely behind a paywall, blocked access, or were not standard news pages:")
+            for failed_url in failed_urls:
+                st.markdown(f"- `{failed_url}`")
+
+    if results:
         # Display and Email Logic
         report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
+        st.subheader(f"Successfully Analyzed {len(results)} Articles")
         for i, (url, data) in enumerate(results.items(), 1):
             with st.container(border=True):
                 st.subheader(f"{i}. {data.get('title', 'Title Not Found')}", anchor=False)
