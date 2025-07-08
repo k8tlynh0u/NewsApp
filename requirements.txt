@@ -1,9 +1,9 @@
-# FINAL requirements for the correct, stable build
+# FINAL requirements for the stable, enhanced build
 streamlit
 numpy==1.26.4
 spacy==3.7.4
 
-# Library for Google News
+# Library for Google News mentions
 feedparser
 
 newsapi-python
