@@ -113,7 +113,7 @@ def send_email_with_attachment(subject, body, recipient_email, file_path):
         st.error(f"An error occurred while sending the email: {e}"); return False
 
 # --- STREAMLIT WEB APPLICATION INTERFACE ---
-st.set_page_config(page_title="News & Sentiment Analyzer", layout="wide", page_icon="📰")
+st.set_page_config(page_title="kaitlyn's news report", layout="wide", page_icon="📰")
 st.title("📰 kaitlyn's daily news report")
 st.markdown("""
 track news mentions for any public figure + get an AI summary/sentiment report
