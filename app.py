@@ -1,11 +1,3 @@
-# ==============================================================================
-#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER (FINAL POLISHED BUILD V2)
-#
-# This is the final, production-ready version. It analyzes articles from
-# NewsAPI and provides a complete, transparent report of all articles that
-# were found but could not be analyzed, from any source.
-# ==============================================================================
-
 import streamlit as st
 import os
 import smtplib
@@ -49,7 +41,6 @@ SMTP_PORT = 587
 # --- HELPER FUNCTIONS ---
 
 def fetch_google_news_mentions(person_name, from_date, to_date):
-    """Fetches mentions from Google News RSS. Returns a list of (title, link) tuples."""
     mentions_found = []
     try:
         query_terms = f'"{person_name}" after:{from_date.strftime("%Y-%m-%d")} before:{to_date.strftime("%Y-%m-%d")}'
@@ -67,7 +58,6 @@ def fetch_from_newsapi(api_client, person_name, from_date, to_date):
             q=f'"{person_name}"', from_param=from_date.isoformat(), to=to_date.isoformat(),
             language='en', sort_by='relevancy', page_size=40
         )
-        # We now return the title as well, to display it if it fails
         return [(article.get('title', 'No Title'), article.get('url')) for article in all_articles.get('articles', [])]
     except Exception as e:
         st.error(f"Error fetching from NewsAPI: {e}"); return []
@@ -80,7 +70,6 @@ def process_article(url, name_to_find):
         article = Article(url, config=config)
         article.download()
         article.parse()
-        # Use the article's parsed title if available, otherwise keep the one from the API
         title = article.title if article.title else "Title Not Found"
         if not article.text or len(article.text) < 250:
             return (None, None, None)
@@ -91,7 +80,6 @@ def process_article(url, name_to_find):
     except Exception:
         return (None, None, None)
 
-# (GPT and Email functions remain unchanged)
 def get_summary_from_gpt(article_text):
     if not article_text: return "Summary could not be generated."
     system_prompt = "You are an expert news editor. Create a concise, neutral, two-sentence summary of the provided news article text."
@@ -154,7 +142,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     st.success(f"Found {len(newsapi_articles)} articles from NewsAPI and {len(google_mentions)} mentions from Google News.")
     
     results = {}
-    failed_articles = [] # This will now store (title, url) tuples
+    failed_articles = []
     
     if newsapi_articles:
         with st.spinner(f"Analyzing {len(newsapi_articles)} articles..."):
@@ -164,11 +152,10 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 if article_text:
                     summary = get_summary_from_gpt(article_text)
                     sentiment = get_sentiment_from_gpt(person_name, mentions)
-                    # Use the title from the article if available, otherwise the API's title
                     final_title = processed_title if processed_title != "Title Not Found" else original_title
                     results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
                 else:
-                    failed_articles.append((original_title, url)) # Store the original title and url
+                    failed_articles.append((original_title, url))
                 progress_bar.progress((i + 1) / len(newsapi_articles), text=f"Analyzing: {url[:80]}...")
             progress_bar.empty()
 
@@ -179,13 +166,6 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     
     report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
     
-    # --- THIS IS THE NEW, UNIFIED "FAILED" SECTION ---
-    if failed_articles:
-        with st.expander(f"⚠️ Could not analyze {len(failed_articles)} articles from NewsAPI"):
-            st.write("These articles were found but were likely behind a paywall or blocked by the publisher:")
-            for title, url in failed_articles:
-                st.markdown(f"- **{title}** ([Source]({url}))")
-
     if results:
         st.subheader(f"Analyzed Articles from NewsAPI")
         report_text_content += "--- Analyzed Articles from NewsAPI ---\n\n"
@@ -200,8 +180,22 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 if data['mentions']:
                     with st.expander("Show mentions..."):
                         for sent in data['mentions']: st.markdown(f'- "{sent}"')
-            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n"
+
+            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n"
+            if data['mentions']:
+                report_text_content += "   Mentions Found:\n"
+                for sent in data['mentions']:
+                    report_text_content += f'   - "{sent}"\n'
+                report_text_content += "\n"
+            else:
+                 report_text_content += "   Mentions Found: None\n\n"
     
+    if failed_articles:
+        st.subheader("Unanalyzable Articles from NewsAPI")
+        st.warning("These articles were found but were likely behind a paywall or blocked by the publisher:")
+        for title, url in failed_articles:
+            st.markdown(f"- **{title}** ([Source]({url}))")
+            
     if google_mentions:
         st.subheader(f"Mentions Found on Google News")
         st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
@@ -212,13 +206,13 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
          st.warning("No analyzable articles or mentions were found.")
     
     if recipient_email and (results or google_mentions or failed_articles):
-        # Add failed NewsAPI links to the email report
+        # --- THIS IS THE CORRECTED SECTION ---
         if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
             for i, (title, url) in enumerate(failed_articles, 1):
+                # This line now correctly includes the title
                 report_text_content += f"{i}. {title}\n   Link: {url}\n\n"
         
-        # Add Google Mentions to the email report
         if google_mentions:
             report_text_content += "\n--- Additional Mentions Found on Google News ---\n(Note: These links were not analyzed)\n\n"
             for i, (title, link) in enumerate(google_mentions, 1):
