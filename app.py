@@ -230,7 +230,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     progress_bar = st.progress(0, text="Analyzing articles...")
     
     for i, url in enumerate(final_urls_list):
-        title, mentions, article_text = process_article(url, name_to_find)
+        title, mentions, article_text = process_article(url, person_name)
         if article_text:
             summary = get_summary_from_gpt(article_text)
             sentiment = get_sentiment_from_gpt(person_name, mentions) if mentions else "No mentions found."
