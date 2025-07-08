@@ -1,11 +1,3 @@
-# ==============================================================================
-#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER (FINAL ENHANCED BUILD)
-#
-# This is the final, production-ready version. It analyzes articles from the
-# robust NewsAPI and additionally displays mentions found via Google News
-# for maximum visibility without compromising stability.
-# ==============================================================================
-
 import streamlit as st
 import os
 import smtplib
@@ -15,7 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-import feedparser # We need this back for Google News
+import feedparser
 import spacy
 from newsapi.newsapi_client import NewsApiClient
 from newspaper import Article, Config
@@ -56,7 +48,6 @@ def fetch_google_news_mentions(person_name, from_date, to_date):
         rss_url = f"https://news.google.com/rss/search?q={query_terms.replace(' ', '%20')}&hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
         for entry in feed.entries:
-            # We take the title and the unusable redirect link
             mentions_found.append((entry.get("title", "No Title"), entry.get("link", "")))
         return mentions_found
     except Exception as e:
@@ -176,25 +167,19 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
 
     st.header("📊 Final Report", divider='rainbow')
     
+    report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
+    
     if failed_urls:
         with st.expander(f"⚠️ Could not analyze {len(failed_urls)} articles from NewsAPI"):
             st.write("These articles were likely behind a paywall or blocked by the publisher:")
             for failed_url in failed_urls:
                 st.markdown(f"- `{failed_url}`")
 
-    # Display the new Google News mentions section
-    if google_mentions:
-        st.subheader(f"Mentions Found on Google News")
-        st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
-        for title, link in google_mentions:
-            st.markdown(f"- **{title}** ([Source]({link}))")
-            
     if results:
         st.subheader(f"Successfully Analyzed {len(results)} Articles from NewsAPI")
-        report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
+        report_text_content += "--- Analyzed Articles from NewsAPI ---\n\n" # <-- NEW
         for i, (url, data) in enumerate(results.items(), 1):
             with st.container(border=True):
-                # (Display logic is the same)
                 st.subheader(f"{i}. {data.get('title', 'Title Not Found')}", anchor=False)
                 st.markdown(f"**Source:** [{url}]({url})")
                 st.info(f"**AI Summary:** {data['summary']}")
@@ -204,23 +189,31 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 if data['mentions']:
                     with st.expander("Show mentions..."):
                         for sent in data['mentions']: st.markdown(f'- "{sent}"')
-            report_text_content += f"{i}. {data['title']}\nURL: {url}\n\nSummary: {data['summary']}\nSentiment: {data['sentiment']}\n\n"
-        
-        # Add Google Mentions to the email report as well
-        if google_mentions:
-            report_text_content += "\n--- Additional Mentions Found on Google News ---\n(Note: These links were not analyzed)\n\n"
-            for title, link in google_mentions:
-                report_text_content += f"- {title}\n  Link: {link}\n"
-
-        if recipient_email:
-            with st.spinner("Preparing and sending email report..."):
-                output_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.txt"
-                with open(output_filename, "w", encoding='utf-8') as f: f.write(report_text_content)
-                if send_email_with_attachment(f"News Report for {person_name}", "Attached is your report.", recipient_email, output_filename):
-                    st.success(f"✅ Report sent to {recipient_email}!")
-                else:
-                    st.error("Failed to send email.")
-                if os.path.exists(output_filename): os.remove(output_filename)
+            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n"
     
+    if google_mentions:
+        st.subheader(f"Mentions Found on Google News")
+        st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
+        report_text_content += "\n--- Additional Mentions Found on Google News ---\n(Note: These links were not analyzed)\n\n" # <-- NEW
+        for i, (title, link) in enumerate(google_mentions, 1):
+            st.markdown(f"- **{title}** ([Source]({link}))")
+            report_text_content += f"{i}. {title}\n   Link: {link}\n\n" # <-- NEW
+            
     if not results and not google_mentions:
          st.warning("No analyzable articles or Google News mentions were found.")
+    
+    if recipient_email and (results or google_mentions):
+        with st.spinner("Preparing and sending email report..."):
+            output_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.txt"
+            with open(output_filename, "w", encoding='utf-8') as f:
+                f.write(report_text_content)
+            
+            email_subject = f"News & Sentiment Report for {person_name} on {from_date.strftime('%Y-%m-%d')}"
+            email_body = f"Hi,\n\nPlease find the attached news summary and sentiment report for {person_name}."
+            
+            if send_email_with_attachment(email_subject, email_body, recipient_email, output_filename):
+                st.success(f"✅ Report sent to {recipient_email}!")
+            else:
+                st.error("Failed to send email.")
+            if os.path.exists(output_filename):
+                os.remove(output_filename)
