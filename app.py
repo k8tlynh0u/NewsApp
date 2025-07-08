@@ -115,11 +115,13 @@ def send_email_with_attachment(subject, body, recipient_email, file_path):
 # --- STREAMLIT WEB APPLICATION INTERFACE ---
 st.set_page_config(page_title="News & Sentiment Analyzer", layout="wide", page_icon="📰")
 st.title("📰 kaitlyn's daily news report")
-st.markdown("track news mentions for any public figure + get an AI summary/sentiment report
+st.markdown("""
+track news mentions for any public figure + get an AI summary/sentiment report
 
 enter a name, date, and email to get started.
 
-*refrain from entering today's date for optimal functionality.")
+*refrain from entering today's date for optimal functionality.*
+""")
 
 col1, col2 = st.columns(2)
 with col1:
