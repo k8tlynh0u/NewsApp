@@ -1,3 +1,11 @@
+# ==============================================================================
+#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER (FINAL POLISHED BUILD V2)
+#
+# This is the final, production-ready version. It analyzes articles from
+# NewsAPI and provides a complete, transparent report of all articles that
+# were found but could not be analyzed, from any source.
+# ==============================================================================
+
 import streamlit as st
 import os
 import smtplib
