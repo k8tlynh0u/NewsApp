@@ -1,9 +1,8 @@
 # ==============================================================================
-#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER - WEB APPLICATION (V5 - FINAL)
+#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER - WEB APPLICATION (V6 - ROBUST)
 #
-# This Streamlit application is ready for deployment on Streamlit Cloud.
-# Secrets are handled by st.secrets.
-# Dependencies, including the SpaCy model, are managed in requirements.txt.
+# This version adds robust error handling and debugging output to solve
+# issues where articles fail to parse on the deployment server.
 # ==============================================================================
 
 # --- STEP 1: IMPORT ALL TOOLS ---
@@ -34,22 +33,17 @@ def setup_openai_client():
     """Sets up and returns the OpenAI client, using Streamlit secrets."""
     try:
         openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        if not openai_client.api_key:
-            st.error("OpenAI API key not found in Streamlit secrets.")
-            st.stop()
         return openai_client
     except Exception as e:
         st.error(f"Could not set up OpenAI client: {e}")
         st.stop()
 
-# MODIFIED AND SIMPLIFIED FOR DEPLOYMENT
 @st.cache_resource
 def setup_spacy_model():
-    """Loads and returns the spaCy NLP model, which is pre-installed via requirements.txt."""
+    """Loads and returns the spaCy NLP model, which is pre-installed."""
     try:
         return spacy.load("en_core_web_sm")
     except OSError:
-        # This error will now only appear if the model isn't in requirements.txt
         st.error("SpaCy model 'en_core_web_sm' not found. Please ensure it's in your requirements.txt.")
         st.stop()
 
@@ -104,41 +98,53 @@ def convert_google_news_link(google_news_url: str) -> str | None:
     
     driver = None
     try:
-        # On Streamlit Cloud, Selenium finds chromedriver automatically via the system PATH
         service = ChromeService()
         driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.get(google_news_url)
         WebDriverWait(driver, 15).until(lambda d: "google.com" not in d.current_url)
         return driver.current_url
-    except Exception:
-        return google_news_url # Fallback to original URL on error
+    except Exception as e:
+        # ADDED: Log the error if Selenium fails
+        st.warning(f"Could not resolve Google link {google_news_url}: {e}")
+        return google_news_url
     finally:
         if driver: driver.quit()
 
+# THIS IS THE KEY MODIFIED FUNCTION
 def process_article(url, name_to_find):
     """
     Downloads, parses, and analyzes an article.
-    Returns (title, found_sentences, article_full_text).
+    Includes robust error handling and logging for deployment environments.
     """
     try:
         config = Config()
         config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+        config.request_timeout = 20 # Set a longer timeout
         
         article = Article(url, config=config)
+        
+        # Use a more robust download and parse method
         article.download()
         article.parse()
+        article.nlp() # Process for keywords, which can help extract summaries
 
         title = article.title if article.title else "Title Not Found"
         
-        if not article.text:
-            return (title, [], None)
+        # Check if the text is meaningful (longer than a short error message)
+        if not article.text or len(article.text) < 250:
+            st.warning(f"-> Failed to extract meaningful text from: {url}")
+            return (None, None, None)
         
         full_text = article.text
         doc = nlp(full_text)
         found_sentences = [s.text.strip().replace('\n', ' ') for s in doc.sents if name_to_find.lower() in s.text.lower()]
         return (title, found_sentences, full_text)
-    except Exception:
+    except Exception as e:
+        # ADDED: This is the most important change. It will print the error for a failed article.
+        st.warning(f"-> Could not process article at {url}. Reason: {e}")
         return (None, None, None)
+
+# --- (Other helper functions like GPT calls and email remain the same) ---
 
 def get_summary_from_gpt(article_text):
     if not article_text: return "Article text was empty; summary could not be generated."
@@ -166,6 +172,7 @@ def get_sentiment_from_gpt(person_name, sentences):
     except Exception as e: return f"Sentiment analysis failed: {e}"
 
 def send_email_with_attachment(subject, body, recipient_email, file_path):
+    # Function remains the same
     if not SENDER_PASSWORD:
         st.error("Email password not found in Streamlit secrets. Cannot send email.")
         return False
@@ -213,7 +220,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     from_date = date_input
     to_date = from_date + timedelta(days=1)
     
-    with st.spinner(f"🔍 Searching Google News and NewsAPI for '{person_name}'..."):
+    with st.spinner(f"🔍 Searching for articles about '{person_name}'..."):
         newsapi_client = NewsApiClient(api_key=MY_API_KEY)
         google_urls = fetch_from_google_rss(person_name, from_date, to_date)
         newsapi_urls = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
@@ -225,20 +232,23 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
 
     st.success(f"Found {len(unique_raw_urls)} potential articles. Now cleaning and analyzing...")
     
-    with st.spinner("Resolving Google News links... This may take a moment."):
+    with st.spinner("Resolving links and preparing for analysis..."):
         final_urls_set = {convert_google_news_link(url) for url in unique_raw_urls}
         final_urls_list = sorted([url for url in final_urls_set if url])
     
     results = {}
-    unreadable_articles = []
     progress_bar = st.progress(0, text="Analyzing articles...")
 
+    # A container to show the new debug messages
+    st.markdown("---")
+    st.subheader("⚙️ Analysis Log")
+    st.info("If any articles fail to process, the reason will be shown below.")
+
     for i, url in enumerate(final_urls_list):
+        # We've improved process_article to give us better feedback
         title, mentions, article_text = process_article(url, person_name)
         
-        if article_text is None:
-            unreadable_articles.append(url)
-        else:
+        if article_text:
             summary = get_summary_from_gpt(article_text)
             sentiment = get_sentiment_from_gpt(person_name, mentions) if mentions else "No mentions found."
             results[url] = {'title': title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
@@ -257,7 +267,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     )
 
     if not results:
-        st.warning("No articles could be successfully analyzed. They may have been empty or behind paywalls.")
+        st.warning("No articles could be successfully analyzed. They may have been empty, behind paywalls, or blocked access from the server.")
     
     if results:
         report_text_content += "--- Analyzed Articles ---\n\n"
@@ -276,6 +286,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                         for sent in data['mentions']:
                             st.markdown(f'- "{sent}"')
             
+            # Append to text report for email
             report_text_content += f"{i}. Title: {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n"
             if data['mentions']:
                 report_text_content += "   Mentions Found:\n"
@@ -284,7 +295,8 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 report_text_content += "   Mentions Found: None\n"
             report_text_content += "\n" + "="*50 + "\n\n"
 
-    if recipient_email:
+    # --- Emailing remains the same ---
+    if recipient_email and results:
         with st.spinner("Preparing and sending email report..."):
             output_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.txt"
             with open(output_filename, "w", encoding='utf-8') as f:
