@@ -1,11 +1,17 @@
-# Your FINAL requirements.txt file
+# FINAL requirements.txt with pinned versions for stability
 streamlit
+
+# Pinning numpy and spacy to prevent binary incompatibility
+numpy==1.26.4
+spacy==3.7.4
+
 feedparser
-spacy
 newsapi-python
 newspaper3k
 openai
 selenium
 webdriver-manager
 lxml_html_clean
+
+# This model version is compatible with spacy v3.7.x
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
