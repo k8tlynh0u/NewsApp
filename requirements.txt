@@ -1,13 +1,13 @@
-# FINAL requirements.txt with all features
+# FINAL requirements for a stable, full-featured app
 streamlit
 numpy==1.26.4
 spacy==3.7.4
 
-# Add back the libraries for Google News
+# Libraries for Google News (NO Selenium)
 feedparser
-selenium
-webdriver-manager
+requests
 
+# Other libraries
 newsapi-python
 newspaper3k
 openai
