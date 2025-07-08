@@ -113,13 +113,13 @@ def send_email_with_attachment(subject, body, recipient_email, file_path):
         st.error(f"An error occurred while sending the email: {e}"); return False
 
 # --- STREAMLIT WEB APPLICATION INTERFACE ---
-st.set_page_config(page_title="News & Sentiment Analyzer", layout="wide", page_icon="🤖")
-st.title("🤖 News Mention, Summary & Sentiment Analyzer")
-st.markdown("This tool analyzes articles from NewsAPI and lists additional mentions found on Google News.")
+st.set_page_config(page_title="News & Sentiment Analyzer", layout="wide", page_icon="📰")
+st.title("📰 News Mention, AI Summary & Sentiment Analyzer")
+st.markdown("track news mentions for any public figure. enter a name, date, and email to get started. note, refrain from entering today's date for optimal functionality.")
 
 col1, col2 = st.columns(2)
 with col1:
-    person_name = st.text_input("👤 **Person's Full Name**", placeholder="e.g., Joe Biden")
+    person_name = st.text_input("👤 **Person's Full Name**", placeholder="e.g., Tom Smith")
     date_input = st.date_input("🗓️ **Date to Search**", datetime.now() - timedelta(days=1))
 with col2:
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
