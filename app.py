@@ -1,9 +1,9 @@
 # ==============================================================================
-#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER - WEB APPLICATION (V4 - Corrected & DEPLOYMENT-READY)
+#      NEWS MENTION, SUMMARY & SENTIMENT ANALYZER - WEB APPLICATION (V5 - FINAL)
 #
-# This Streamlit application merges the command-line script's logic with a
-# web interface, including article title extraction.
-# Secrets are handled by Streamlit's secrets management for secure deployment.
+# This Streamlit application is ready for deployment on Streamlit Cloud.
+# Secrets are handled by st.secrets.
+# Dependencies, including the SpaCy model, are managed in requirements.txt.
 # ==============================================================================
 
 # --- STEP 1: IMPORT ALL TOOLS ---
@@ -26,17 +26,13 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
-
 
 # --- STEP 2: SETUP & CONFIGURATION (Wrapped in caching functions) ---
 
-# @st.cache_resource ensures these heavy objects are loaded only once.
 @st.cache_resource
 def setup_openai_client():
     """Sets up and returns the OpenAI client, using Streamlit secrets."""
     try:
-        # MODIFIED: Get API key from st.secrets
         openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
         if not openai_client.api_key:
             st.error("OpenAI API key not found in Streamlit secrets.")
@@ -46,33 +42,22 @@ def setup_openai_client():
         st.error(f"Could not set up OpenAI client: {e}")
         st.stop()
 
+# MODIFIED AND SIMPLIFIED FOR DEPLOYMENT
 @st.cache_resource
 def setup_spacy_model():
-    """Loads and returns the spaCy NLP model."""
+    """Loads and returns the spaCy NLP model, which is pre-installed via requirements.txt."""
     try:
         return spacy.load("en_core_web_sm")
     except OSError:
-        st.warning("spaCy model not found. Downloading 'en_core_web_sm'...")
-        from spacy.cli import download
-        download("en_core_web_sm")
-        return spacy.load("en_core_web_sm")
-
-@st.cache_resource
-def get_webdriver_path():
-    """Installs and returns the path to the Chrome WebDriver."""
-    try:
-        # Note: This is for local running. On Streamlit Cloud, the path is handled automatically.
-        return ChromeDriverManager().install()
-    except Exception as e:
-        st.error(f"Could not set up Selenium WebDriver. Please ensure Google Chrome is installed. Error: {e}")
+        # This error will now only appear if the model isn't in requirements.txt
+        st.error("SpaCy model 'en_core_web_sm' not found. Please ensure it's in your requirements.txt.")
         st.stop()
 
 # --- Load all necessary models and clients ---
 openai_client = setup_openai_client()
 nlp = setup_spacy_model()
-chrome_driver_path = get_webdriver_path()
 
-# --- API & Email Configuration (MODIFIED TO USE STREAMLIT SECRETS) ---
+# --- API & Email Configuration (Using Streamlit Secrets) ---
 MY_API_KEY = st.secrets["NEWSAPI_KEY"]
 SENDER_EMAIL = st.secrets["SENDER_EMAIL"]
 SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
@@ -80,7 +65,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
 
-# --- STEP 3: HELPER FUNCTIONS (Integrated with title extraction) ---
+# --- STEP 3: HELPER FUNCTIONS ---
 
 def fetch_from_google_rss(person_name, from_date, to_date):
     urls_found = []
@@ -111,18 +96,15 @@ def convert_google_news_link(google_news_url: str) -> str | None:
     if 'google.com' not in google_news_url:
         return google_news_url
     
-    # These options are crucial for running Selenium on Streamlit Cloud
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--log-level=3")
     
     driver = None
     try:
-        # On Streamlit Cloud, we don't need webdriver-manager.
-        # It finds the chromedriver automatically if you've listed it in packages.txt
+        # On Streamlit Cloud, Selenium finds chromedriver automatically via the system PATH
         service = ChromeService()
         driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.get(google_news_url)
@@ -135,13 +117,12 @@ def convert_google_news_link(google_news_url: str) -> str | None:
 
 def process_article(url, name_to_find):
     """
-    Downloads an article, extracts its title, full text, and finds sentences with the name.
-    Returns a tuple: (title, found_sentences, article_full_text).
-    Returns (None, None, None) if the article could not be read.
+    Downloads, parses, and analyzes an article.
+    Returns (title, found_sentences, article_full_text).
     """
     try:
         config = Config()
-        config.browser_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
         
         article = Article(url, config=config)
         article.download()
@@ -220,7 +201,7 @@ st.markdown("This tool scours the web for news about a specific person on a give
 col1, col2 = st.columns(2)
 with col1:
     person_name = st.text_input("👤 **Person's Full Name**", placeholder="e.g., Taylor Swift")
-    date_input = st.date_input("🗓️ **Date to Search**")
+    date_input = st.date_input("🗓️ **Date to Search**", datetime.now() - timedelta(days=1))
 with col2:
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
 
@@ -233,7 +214,6 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     to_date = from_date + timedelta(days=1)
     
     with st.spinner(f"🔍 Searching Google News and NewsAPI for '{person_name}'..."):
-        # The API key for newsapi_client is already set from st.secrets
         newsapi_client = NewsApiClient(api_key=MY_API_KEY)
         google_urls = fetch_from_google_rss(person_name, from_date, to_date)
         newsapi_urls = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
@@ -245,8 +225,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
 
     st.success(f"Found {len(unique_raw_urls)} potential articles. Now cleaning and analyzing...")
     
-    with st.spinner("Resolving links and preparing for analysis... This may take a moment."):
-        # Use a list comprehension for a cleaner look
+    with st.spinner("Resolving Google News links... This may take a moment."):
         final_urls_set = {convert_google_news_link(url) for url in unique_raw_urls}
         final_urls_list = sorted([url for url in final_urls_set if url])
     
@@ -278,7 +257,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     )
 
     if not results:
-        st.warning("No articles could be successfully analyzed. They may have been empty or blocked access.")
+        st.warning("No articles could be successfully analyzed. They may have been empty or behind paywalls.")
     
     if results:
         report_text_content += "--- Analyzed Articles ---\n\n"
@@ -312,13 +291,12 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 f.write(report_text_content)
             
             email_subject = f"News & Sentiment Report for {person_name} on {from_date.strftime('%Y-%m-%d')}"
-            email_body = f"Hi,\n\nPlease find the attached news summary and sentiment report for {person_name} covering {from_date.strftime('%Y-%m-%d')}.\n\nBest wishes,\nKaitlyn's Robot Minion"
+            email_body = f"Hi,\n\nPlease find the attached news summary and sentiment report for {person_name} covering {from_date.strftime('%Y-%m-%d')}.\n\nBest wishes,\nYour Friendly News Bot"
             
             if send_email_with_attachment(email_subject, email_body, recipient_email, output_filename):
                 st.success(f"✅ Report successfully sent to {recipient_email}!")
             else:
                 st.error("Failed to send the email report.")
             
-            # Clean up the created file
             if os.path.exists(output_filename):
                 os.remove(output_filename)
