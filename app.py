@@ -41,6 +41,7 @@ SMTP_PORT = 587
 # --- HELPER FUNCTIONS ---
 
 def fetch_google_news_mentions(person_name, from_date, to_date):
+    """Fetches mentions from Google News RSS. Returns a list of (title, link) tuples."""
     mentions_found = []
     try:
         query_terms = f'"{person_name}" after:{from_date.strftime("%Y-%m-%d")} before:{to_date.strftime("%Y-%m-%d")}'
@@ -58,7 +59,8 @@ def fetch_from_newsapi(api_client, person_name, from_date, to_date):
             q=f'"{person_name}"', from_param=from_date.isoformat(), to=to_date.isoformat(),
             language='en', sort_by='relevancy', page_size=40
         )
-        return [article['url'] for article in all_articles.get('articles', [])]
+        # We now return the title as well, to display it if it fails
+        return [(article.get('title', 'No Title'), article.get('url')) for article in all_articles.get('articles', [])]
     except Exception as e:
         st.error(f"Error fetching from NewsAPI: {e}"); return []
 
@@ -70,6 +72,7 @@ def process_article(url, name_to_find):
         article = Article(url, config=config)
         article.download()
         article.parse()
+        # Use the article's parsed title if available, otherwise keep the one from the API
         title = article.title if article.title else "Title Not Found"
         if not article.text or len(article.text) < 250:
             return (None, None, None)
@@ -121,7 +124,6 @@ st.markdown("This tool analyzes articles from NewsAPI and lists additional menti
 col1, col2 = st.columns(2)
 with col1:
     person_name = st.text_input("👤 **Person's Full Name**", placeholder="e.g., Joe Biden")
-    # --- CHANGE 1: Default date is now YESTERDAY for better results ---
     date_input = st.date_input("🗓️ **Date to Search**", datetime.now() - timedelta(days=1))
 with col2:
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
@@ -136,30 +138,30 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     with st.spinner(f"🔍 Searching sources for '{person_name}'..."):
         newsapi_client = NewsApiClient(api_key=MY_API_KEY)
         google_mentions = fetch_google_news_mentions(person_name, from_date, to_date)
-        newsapi_urls = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
+        newsapi_articles = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
     
-    final_urls_list = sorted(list(set(newsapi_urls)))
-    
-    if not final_urls_list and not google_mentions:
+    if not newsapi_articles and not google_mentions:
         st.error(f"No articles or mentions found for '{person_name}' on {from_date.strftime('%Y-%m-%d')}."); st.stop()
 
-    st.success(f"Found {len(final_urls_list)} analyzable articles from NewsAPI and {len(google_mentions)} mentions from Google News.")
+    st.success(f"Found {len(newsapi_articles)} articles from NewsAPI and {len(google_mentions)} mentions from Google News.")
     
     results = {}
-    failed_urls = []
+    failed_articles = [] # This will now store (title, url) tuples
     
-    if final_urls_list:
-        with st.spinner(f"Analyzing {len(final_urls_list)} articles..."):
+    if newsapi_articles:
+        with st.spinner(f"Analyzing {len(newsapi_articles)} articles..."):
             progress_bar = st.progress(0, text="Analyzing articles...")
-            for i, url in enumerate(final_urls_list):
-                title, mentions, article_text = process_article(url, person_name)
+            for i, (original_title, url) in enumerate(newsapi_articles):
+                processed_title, mentions, article_text = process_article(url, person_name)
                 if article_text:
                     summary = get_summary_from_gpt(article_text)
                     sentiment = get_sentiment_from_gpt(person_name, mentions)
-                    results[url] = {'title': title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
+                    # Use the title from the article if available, otherwise the API's title
+                    final_title = processed_title if processed_title != "Title Not Found" else original_title
+                    results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
                 else:
-                    failed_urls.append(url)
-                progress_bar.progress((i + 1) / len(final_urls_list), text=f"Analyzing: {url[:80]}...")
+                    failed_articles.append((original_title, url)) # Store the original title and url
+                progress_bar.progress((i + 1) / len(newsapi_articles), text=f"Analyzing: {url[:80]}...")
             progress_bar.empty()
 
     st.success("✅ Analysis Complete!")
@@ -169,12 +171,12 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     
     report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
     
-    # --- CHANGE 2 (On-Screen): This section now has a more descriptive title ---
-    if failed_urls:
-        with st.expander(f"⚠️ Could not analyze {len(failed_urls)} articles from NewsAPI"):
+    # --- THIS IS THE NEW, UNIFIED "FAILED" SECTION ---
+    if failed_articles:
+        with st.expander(f"⚠️ Could not analyze {len(failed_articles)} articles from NewsAPI"):
             st.write("These articles were found but were likely behind a paywall or blocked by the publisher:")
-            for failed_url in failed_urls:
-                st.markdown(f"- `{failed_url}`")
+            for title, url in failed_articles:
+                st.markdown(f"- **{title}** ([Source]({url}))")
 
     if results:
         st.subheader(f"Analyzed Articles from NewsAPI")
@@ -182,7 +184,6 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
         for i, (url, data) in enumerate(results.items(), 1):
             with st.container(border=True):
                 st.subheader(f"{i}. {data.get('title', 'Title Not Found')}", anchor=False)
-                # ... rest of display logic is the same ...
                 st.markdown(f"**Source:** [{url}]({url})")
                 st.info(f"**AI Summary:** {data['summary']}")
                 if "Positive" in data['sentiment']: st.success(f"**Sentiment:** {data['sentiment']}")
@@ -198,17 +199,16 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
         st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
         for title, link in google_mentions:
             st.markdown(f"- **{title}** ([Source]({link}))")
-
-    if not results and not google_mentions:
-         st.warning("No analyzable articles or Google News mentions were found.")
+            
+    if not results and not google_mentions and not failed_articles:
+         st.warning("No analyzable articles or mentions were found.")
     
-    # --- CHANGE 3 (Email Report): Now we add ALL sections to the email ---
-    if recipient_email and (results or google_mentions or failed_urls):
+    if recipient_email and (results or google_mentions or failed_articles):
         # Add failed NewsAPI links to the email report
-        if failed_urls:
+        if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
-            for i, url in enumerate(failed_urls, 1):
-                report_text_content += f"{i}. {url}\n"
+            for i, (title, url) in enumerate(failed_articles, 1):
+                report_text_content += f"{i}. {title}\n   Link: {url}\n\n"
         
         # Add Google Mentions to the email report
         if google_mentions:
