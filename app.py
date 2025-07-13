@@ -119,9 +119,12 @@ st.set_page_config(page_title="kaitlyn's news report", layout="wide", page_icon=
 st.title("📰 kaitlyn's daily news report")
 st.markdown("""
 track news mentions for any public figure + get an AI summary/sentiment report
+
 enter a name, date, and email to get started
+
 *refrain from entering today's date for optimal functionality*
 """)
+
 
 col1, col2 = st.columns(2)
 with col1:
