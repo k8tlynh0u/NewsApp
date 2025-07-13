@@ -1,7 +1,5 @@
 # FINAL requirements for the stable, enhanced build
 streamlit
-streamlit-authenticator
-PyYAML
 numpy==1.26.4
 spacy==3.7.4
 
