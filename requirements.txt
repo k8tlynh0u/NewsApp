@@ -1,13 +1,24 @@
+# FINAL requirements for the stable, enhanced build
 streamlit
 numpy==1.26.4
 spacy==3.7.4
+
+# Library for Google News mentions
 feedparser
+
+# Core functionality libraries
 newsapi-python
 newspaper3k
 openai
 lxml_html_clean
+
+# Libraries for data manipulation and charting
 pandas
 plotly
+
+# Libraries for generating the word cloud
 wordcloud
 matplotlib
+
+# Direct link to the required spacy model for reliability on Streamlit Cloud
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
