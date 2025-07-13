@@ -130,6 +130,7 @@ with col1:
 with col2:
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
 
+# --- MODIFICATION: The entire 'if st.button' block is replaced with this new version ---
 if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     if not person_name:
         st.warning("Please enter a person's name to start the analysis."); st.stop()
@@ -137,35 +138,55 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     from_date = date_input
     to_date = from_date + timedelta(days=1)
     
-    with st.spinner(f"🔍 Searching sources for '{person_name}'..."):
-        newsapi_client = NewsApiClient(api_key=MY_API_KEY)
-        google_mentions = fetch_google_news_mentions(person_name, from_date, to_date)
-        newsapi_articles = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
-    
-    if not newsapi_articles and not google_mentions:
-        st.error(f"No articles or mentions found for '{person_name}' on {from_date.strftime('%Y-%m-%d')}."); st.stop()
-
-    st.success(f"Found {len(newsapi_articles)} articles from NewsAPI and {len(google_mentions)} mentions from Google News.")
-    
     results = {}
     failed_articles = []
     
-    if newsapi_articles:
-        with st.spinner(f"Analyzing {len(newsapi_articles)} articles..."):
-            progress_bar = st.progress(0, text="Analyzing articles...")
+    # This `st.status` block creates the "chain of thought" box
+    with st.status(f"Running Analysis for '{person_name}'...", expanded=True) as status:
+        
+        status.write("🧠 **Step 1: Fetching Articles**")
+        status.write("➡️ Calling NewsAPI to find relevant articles...")
+        newsapi_client = NewsApiClient(api_key=MY_API_KEY)
+        newsapi_articles = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
+        status.write(f"✅ Found {len(newsapi_articles)} potential articles from NewsAPI.")
+        
+        status.write("➡️ Calling Google News RSS to find other mentions...")
+        google_mentions = fetch_google_news_mentions(person_name, from_date, to_date)
+        status.write(f"✅ Found {len(google_mentions)} potential mentions from Google News.")
+
+        if not newsapi_articles and not google_mentions:
+            status.update(label="Analysis failed!", state="error", expanded=True)
+            st.error(f"No articles or mentions found for '{person_name}' on {from_date.strftime('%Y-%m-%d')}."); st.stop()
+
+        if newsapi_articles:
+            status.write(f"🧠 **Step 2: Analyzing {len(newsapi_articles)} Articles**")
+            
             for i, (original_title, url) in enumerate(newsapi_articles):
+                status.write(f"➡️ **Processing Article {i+1}/{len(newsapi_articles)}:** [{original_title}]({url})")
+                
+                status.write("   - Downloading and parsing content...")
                 processed_title, mentions, article_text = process_article(url, person_name)
+                
                 if article_text:
+                    status.write("   - ✅ Content parsed. Found relevant mentions.")
+                    
+                    status.write("   - 🤖 Sending article to GPT-4o for summarization...")
                     summary = get_summary_from_gpt(article_text)
+                    status.write("   - ✅ Summary received.")
+                    
+                    status.write("   - 🤖 Sending mentions to GPT-4o for sentiment analysis...")
                     sentiment = get_sentiment_from_gpt(person_name, mentions)
+                    status.write("   - ✅ Sentiment received.")
+                    
                     final_title = processed_title if processed_title != "Title Not Found" else original_title
                     results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
                 else:
+                    status.write(f"   - ⚠️ Skipping article (likely paywalled or too short).")
                     failed_articles.append((original_title, url))
-                progress_bar.progress((i + 1) / len(newsapi_articles), text=f"Analyzing: {url[:80]}...")
-            progress_bar.empty()
 
-    st.success("✅ Analysis Complete!")
+        status.write("🧠 **Step 3: Compiling Final Report**")
+        status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
+
     if results: st.balloons()
 
     st.header("📊 Final Report", divider='rainbow')
@@ -212,11 +233,9 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
          st.warning("No analyzable articles or mentions were found.")
     
     if recipient_email and (results or google_mentions or failed_articles):
-        # --- THIS IS THE CORRECTED SECTION ---
         if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
             for i, (title, url) in enumerate(failed_articles, 1):
-                # This line now correctly includes the title
                 report_text_content += f"{i}. {title}\n   Link: {url}\n\n"
         
         if google_mentions:
