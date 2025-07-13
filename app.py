@@ -12,6 +12,7 @@ import spacy
 from newsapi.newsapi_client import NewsApiClient
 from newspaper import Article, Config
 from openai import OpenAI
+from fpdf import FPDF # <-- IMPORT FPDF
 
 # --- SETUP & CONFIGURATION ---
 
@@ -112,6 +113,24 @@ def send_email_with_attachment(subject, body, recipient_email, file_path):
     except Exception as e:
         st.error(f"An error occurred while sending the email: {e}"); return False
 
+# --- NEW PDF HELPER FUNCTION ---
+def create_pdf_report(content, filename, person_name, date_str):
+    """Generates a PDF file from a text string."""
+    pdf = FPDF()
+    pdf.add_page()
+    
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 10, f"News Report for {person_name}", 0, 1, 'C')
+    pdf.set_font('Arial', '', 12)
+    pdf.cell(0, 10, f"Date: {date_str}", 0, 1, 'C')
+    pdf.ln(10)
+
+    pdf.set_font('Arial', '', 10)
+    safe_content = content.encode('latin-1', 'replace').decode('latin-1')
+    pdf.multi_cell(0, 5, safe_content)
+    
+    pdf.output(filename)
+
 # --- STREAMLIT WEB APPLICATION INTERFACE ---
 st.set_page_config(page_title="kaitlyn's news report", layout="wide", page_icon="📰")
 st.title("📰 kaitlyn's daily news report")
@@ -130,7 +149,6 @@ with col1:
 with col2:
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
 
-# --- MODIFICATION: The entire 'if st.button' block is replaced with this new version ---
 if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     if not person_name:
         st.warning("Please enter a person's name to start the analysis."); st.stop()
@@ -141,18 +159,17 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     results = {}
     failed_articles = []
     
-    # This `st.status` block creates the "chain of thought" box
     with st.status(f"Running Analysis for '{person_name}'...", expanded=True) as status:
         
         status.write("🧠 **Step 1: Fetching Articles**")
-        status.write("➡️ Calling NewsAPI to find relevant articles...")
+        status.write("➡️ Calling NewsAPI...")
         newsapi_client = NewsApiClient(api_key=MY_API_KEY)
         newsapi_articles = fetch_from_newsapi(newsapi_client, person_name, from_date, to_date)
-        status.write(f"✅ Found {len(newsapi_articles)} potential articles from NewsAPI.")
+        status.write(f"✅ Found {len(newsapi_articles)} articles from NewsAPI.")
         
-        status.write("➡️ Calling Google News RSS to find other mentions...")
+        status.write("➡️ Calling Google News RSS...")
         google_mentions = fetch_google_news_mentions(person_name, from_date, to_date)
-        status.write(f"✅ Found {len(google_mentions)} potential mentions from Google News.")
+        status.write(f"✅ Found {len(google_mentions)} mentions from Google News.")
 
         if not newsapi_articles and not google_mentions:
             status.update(label="Analysis failed!", state="error", expanded=True)
@@ -163,25 +180,21 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
             
             for i, (original_title, url) in enumerate(newsapi_articles):
                 status.write(f"➡️ **Processing Article {i+1}/{len(newsapi_articles)}:** [{original_title}]({url})")
-                
-                status.write("   - Downloading and parsing content...")
+                status.write("   - Downloading and parsing...")
                 processed_title, mentions, article_text = process_article(url, person_name)
                 
                 if article_text:
-                    status.write("   - ✅ Content parsed. Found relevant mentions.")
-                    
-                    status.write("   - 🤖 Sending article to GPT-4o for summarization...")
+                    status.write("   - ✅ Content parsed.")
+                    status.write("   - 🤖 Requesting summary from GPT-4o...")
                     summary = get_summary_from_gpt(article_text)
                     status.write("   - ✅ Summary received.")
-                    
-                    status.write("   - 🤖 Sending mentions to GPT-4o for sentiment analysis...")
+                    status.write("   - 🤖 Requesting sentiment from GPT-4o...")
                     sentiment = get_sentiment_from_gpt(person_name, mentions)
                     status.write("   - ✅ Sentiment received.")
-                    
                     final_title = processed_title if processed_title != "Title Not Found" else original_title
                     results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
                 else:
-                    status.write(f"   - ⚠️ Skipping article (likely paywalled or too short).")
+                    status.write(f"   - ⚠️ Skipping article (paywall or short).")
                     failed_articles.append((original_title, url))
 
         status.write("🧠 **Step 3: Compiling Final Report**")
@@ -194,6 +207,8 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
     
     if results:
+        # Code to display report on page and build report_text_content
+        # ... (This part remains the same)
         st.subheader(f"Analyzed Articles from NewsAPI")
         report_text_content += "--- Analyzed Articles from NewsAPI ---\n\n"
         for i, (url, data) in enumerate(results.items(), 1):
@@ -232,6 +247,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     if not results and not google_mentions and not failed_articles:
          st.warning("No analyzable articles or mentions were found.")
     
+    # --- MODIFIED EMAIL SECTION ---
     if recipient_email and (results or google_mentions or failed_articles):
         if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
@@ -242,18 +258,24 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
             report_text_content += "\n--- Additional Mentions Found on Google News ---\n(Note: These links were not analyzed)\n\n"
             for i, (title, link) in enumerate(google_mentions, 1):
                 report_text_content += f"{i}. {title}\n   Link: {link}\n\n"
+        
+        with st.spinner("Preparing and sending PDF report..."):
+            pdf_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.pdf"
+            
+            create_pdf_report(
+                report_text_content, 
+                pdf_filename, 
+                person_name, 
+                from_date.strftime('%A, %B %d, %Y')
+            )
 
-        with st.spinner("Preparing and sending email report..."):
-            output_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.txt"
-            with open(output_filename, "w", encoding='utf-8') as f:
-                f.write(report_text_content)
-            
             email_subject = f"News & Sentiment Report for {person_name} on {from_date.strftime('%Y-%m-%d')}"
-            email_body = f"Hi,\n\nPlease find the attached comprehensive news report for {person_name}."
+            email_body = f"Hi,\n\nPlease find the attached comprehensive news report for {person_name} in PDF format."
             
-            if send_email_with_attachment(email_subject, email_body, recipient_email, output_filename):
-                st.success(f"✅ Report sent to {recipient_email}!")
+            if send_email_with_attachment(email_subject, email_body, recipient_email, pdf_filename):
+                st.success(f"✅ PDF Report sent to {recipient_email}!")
             else:
                 st.error("Failed to send email.")
-            if os.path.exists(output_filename):
-                os.remove(output_filename)
+                
+            if os.path.exists(pdf_filename):
+                os.remove(pdf_filename)
