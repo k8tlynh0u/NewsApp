@@ -13,7 +13,7 @@ from newsapi.newsapi_client import NewsApiClient
 from newspaper import Article, Config
 from openai import OpenAI
 
-# --- MODIFICATION: Import the new PDF creation function from the separate file ---
+# CORRECT: Importing the PDF function from your separate utilities file
 from pdf_utils import create_pdf_from_text
 
 # --- SETUP & CONFIGURATION ---
@@ -41,7 +41,7 @@ SENDER_PASSWORD = st.secrets["SENDER_PASSWORD"]
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# --- HELPER FUNCTIONS (No changes needed here) ---
+# --- HELPER FUNCTIONS ---
 
 def fetch_google_news_mentions(person_name, from_date, to_date):
     mentions_found = []
@@ -120,9 +120,7 @@ st.set_page_config(page_title="kaitlyn's news report", layout="wide", page_icon=
 st.title("📰 kaitlyn's daily news report")
 st.markdown("""
 track news mentions for any public figure + get an AI summary/sentiment report
-
 enter a name, date, and email to get started
-
 *refrain from entering today's date for optimal functionality*
 """)
 
@@ -144,7 +142,6 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     failed_articles = []
     
     with st.status(f"Running Analysis for '{person_name}'...", expanded=True) as status:
-        
         status.write("🧠 **Step 1: Fetching Articles**")
         status.write("➡️ Calling NewsAPI...")
         newsapi_client = NewsApiClient(api_key=MY_API_KEY)
@@ -188,6 +185,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
 
     st.header("📊 Final Report", divider='rainbow')
     
+    # Initialize the string that will become the body of the report
     report_text_content = ""
     
     if results:
@@ -229,7 +227,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     if not results and not google_mentions and not failed_articles:
          st.warning("No analyzable articles or mentions were found.")
     
-    # --- MODIFICATION: This block now uses the external PDF function ---
+    # --- FINAL, CORRECTED EMAIL BLOCK THAT USES PDF ---
     if recipient_email and (results or google_mentions or failed_articles):
         # Add unanalyzable articles and Google mentions to the report string
         if failed_articles:
