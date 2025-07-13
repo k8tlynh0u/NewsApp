@@ -48,6 +48,7 @@ def parse_sentiment(sentiment_string):
     if "Negative" in sentiment_string: return "Negative"
     return "Neutral"
 
+# (The rest of your helper functions are unchanged)
 def fetch_google_news_mentions(person_name, from_date, to_date):
     mentions_found = []
     try:
@@ -156,33 +157,48 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 status.write(f"➡️ **Processing Article {i+1}/{len(newsapi_articles)}:** [{original_title}]({url})")
                 processed_title, mentions, article_text = process_article(url, person_name)
                 
+                # --- MODIFIED LOGIC BLOCK ---
                 if article_text:
-                    summary, sentiment = get_summary_from_gpt(article_text), get_sentiment_from_gpt(person_name, mentions)
-                    final_title = processed_title if processed_title != "Title Not Found" else original_title
-                    results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
-                    sentiments_list.append(parse_sentiment(sentiment))
-                    sources_list.append(urlparse(url).netloc.replace('www.', ''))
-                    wordcloud_text += f" {final_title} {summary}"
+                    # Condition: Only proceed if the person was actually mentioned in sentences.
+                    if mentions:
+                        status.write("   - ✅ Content parsed, mentions found. Proceeding with AI analysis.")
+                        summary = get_summary_from_gpt(article_text)
+                        sentiment = get_sentiment_from_gpt(person_name, mentions)
+                        
+                        final_title = processed_title if processed_title != "Title Not Found" else original_title
+                        results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
+                        
+                        sentiments_list.append(parse_sentiment(sentiment))
+                        sources_list.append(urlparse(url).netloc.replace('www.', ''))
+                        wordcloud_text += f" {final_title} {summary}"
+                    else:
+                        # This article is readable but doesn't mention the person, so we skip it.
+                        status.write(f"   - ⚠️ Skipping (no specific mentions of '{person_name}' found in article text).")
                 else:
+                    # This article failed to download (paywall, etc.)
+                    status.write("   - ⚠️ Skipping (article content is unreadable or too short).")
                     failed_articles.append((original_title, url))
         
         status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
 
     if not results and not google_mentions:
-        st.warning("No analyzable articles or mentions were found."); st.stop()
+        st.warning("No articles with direct mentions were found to analyze."); st.stop()
     
     if results: st.balloons()
     
     st.header("📊 Report at a Glance", divider='rainbow')
-    donut_fig, bar_fig, wordcloud_img = create_sentiment_donut_chart(sentiments_list), create_source_bar_chart(sources_list), create_word_cloud(wordcloud_text)
+    donut_fig = create_sentiment_donut_chart(sentiments_list)
+    bar_fig = create_source_bar_chart(sources_list)
+    wordcloud_img = create_word_cloud(wordcloud_text)
     
-    viz_col1, viz_col2 = st.columns(2)
-    with viz_col1:
-        if donut_fig: st.plotly_chart(donut_fig, use_container_width=True)
-    with viz_col2:
-        if bar_fig: st.plotly_chart(bar_fig, use_container_width=True)
-    if wordcloud_img:
-        st.subheader("Keyword Cloud"); st.image(wordcloud_img, use_column_width=True)
+    if results:
+        viz_col1, viz_col2 = st.columns(2)
+        with viz_col1:
+            if donut_fig: st.plotly_chart(donut_fig, use_container_width=True)
+        with viz_col2:
+            if bar_fig: st.plotly_chart(bar_fig, use_container_width=True)
+        if wordcloud_img:
+            st.subheader("Keyword Cloud"); st.image(wordcloud_img, use_column_width=True)
 
     st.header("📄 Detailed Article Breakdown", divider='rainbow')
     report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
@@ -199,28 +215,22 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 if data['mentions']:
                     with st.expander("Show mentions..."):
                         for sent in data['mentions']: st.markdown(f'- "{sent}"')
-            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n"
-            if data['mentions']:
-                report_text_content += "   Mentions Found:\n"
-                for sent in data['mentions']: report_text_content += f'   - "{sent}"\n'
-                report_text_content += "\n"
-            else: report_text_content += "   Mentions Found: None\n\n"
+            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n   Mentions Found:\n"
+            for sent in data['mentions']: report_text_content += f'   - "{sent}"\n'
+            report_text_content += "\n"
     
-    # --- RESTORED: Display unanalyzable articles on the webpage ---
     if failed_articles:
         st.subheader("Unanalyzable Articles from NewsAPI")
         st.warning("These articles were found but were likely behind a paywall or blocked by the publisher:")
         for title, url in failed_articles:
             st.markdown(f"- **{title}** ([Source]({url}))")
             
-    # --- RESTORED: Display Google News mentions on the webpage ---
     if google_mentions:
         st.subheader(f"Mentions Found on Google News")
         st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
         for title, link in google_mentions:
             st.markdown(f"- **{title}** ([Source]({link}))")
 
-    # --- This is the email sending logic, which remains correct ---
     if recipient_email and (results or google_mentions or failed_articles):
         if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
