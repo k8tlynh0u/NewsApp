@@ -44,11 +44,8 @@ SMTP_PORT = 587
 # --- HELPER FUNCTIONS ---
 
 def parse_sentiment(sentiment_string):
-    """Parses the primary sentiment label from the GPT response."""
-    if "Positive" in sentiment_string:
-        return "Positive"
-    elif "Negative" in sentiment_string:
-        return "Negative"
+    if "Positive" in sentiment_string: return "Positive"
+    if "Negative" in sentiment_string: return "Negative"
     return "Neutral"
 
 def fetch_google_news_mentions(person_name, from_date, to_date):
@@ -75,21 +72,14 @@ def fetch_from_newsapi(api_client, person_name, from_date, to_date):
 
 def process_article(url, name_to_find):
     try:
-        config = Config()
-        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        config.request_timeout = 25
-        article = Article(url, config=config)
-        article.download()
-        article.parse()
+        config = Config(); config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'; config.request_timeout = 25
+        article = Article(url, config=config); article.download(); article.parse()
         title = article.title if article.title else "Title Not Found"
-        if not article.text or len(article.text) < 250:
-            return (None, None, None)
-        full_text = article.text
-        doc = nlp(full_text)
+        if not article.text or len(article.text) < 250: return (None, None, None)
+        doc = nlp(article.text)
         found_sentences = [s.text.strip().replace('\n', ' ') for s in doc.sents if name_to_find.lower() in s.text.lower()]
-        return (title, found_sentences, full_text)
-    except Exception:
-        return (None, None, None)
+        return (title, found_sentences, article.text)
+    except Exception: return (None, None, None)
 
 def get_summary_from_gpt(article_text):
     if not article_text: return "Summary could not be generated."
@@ -110,7 +100,6 @@ def get_sentiment_from_gpt(person_name, sentences):
         return response.choices[0].message.content.strip()
     except Exception as e: return f"Sentiment analysis failed: {e}"
 
-# --- RESTORED: The original email sending function ---
 def send_email_with_attachment(subject, body, recipient_email, file_path):
     if not SENDER_PASSWORD: return False
     try:
@@ -138,7 +127,6 @@ with col1:
     person_name = st.text_input("👤 **Person's Full Name**", placeholder="e.g., Tom Smith")
     date_input = st.date_input("🗓️ **Date to Search**", datetime.now() - timedelta(days=1))
 with col2:
-    # --- RESTORED: The email input field ---
     recipient_email = st.text_input("✉️ **Your Email Address (Optional)**", placeholder="Enter your email to receive the report")
 
 if st.button("🚀 Generate Report", type="primary", use_container_width=True):
@@ -148,11 +136,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
     from_date = date_input
     to_date = from_date + timedelta(days=1)
     
-    results = {}
-    failed_articles = []
-    
-    sentiments_list = []
-    sources_list = []
+    results, failed_articles, sentiments_list, sources_list = {}, [], [], []
     wordcloud_text = ""
 
     with st.status(f"Running Analysis for '{person_name}'...", expanded=True) as status:
@@ -164,8 +148,7 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
         status.write(f"✅ Found {len(google_mentions)} mentions from Google News.")
 
         if not newsapi_articles and not google_mentions:
-            status.update(label="Analysis failed!", state="error", expanded=True)
-            st.error(f"No articles or mentions found for '{person_name}' on {from_date.strftime('%Y-%m-%d')}."); st.stop()
+            status.update(label="Analysis failed!", state="error", expanded=True); st.error(f"No articles or mentions found for '{person_name}' on {from_date.strftime('%Y-%m-%d')}."); st.stop()
         
         if newsapi_articles:
             status.write(f"🧠 **Step 2: Analyzing {len(newsapi_articles)} Articles**")
@@ -174,89 +157,83 @@ if st.button("🚀 Generate Report", type="primary", use_container_width=True):
                 processed_title, mentions, article_text = process_article(url, person_name)
                 
                 if article_text:
-                    summary = get_summary_from_gpt(article_text)
-                    sentiment = get_sentiment_from_gpt(person_name, mentions)
+                    summary, sentiment = get_summary_from_gpt(article_text), get_sentiment_from_gpt(person_name, mentions)
                     final_title = processed_title if processed_title != "Title Not Found" else original_title
                     results[url] = {'title': final_title, 'summary': summary, 'mentions': mentions, 'sentiment': sentiment}
-
                     sentiments_list.append(parse_sentiment(sentiment))
-                    domain = urlparse(url).netloc.replace('www.', '')
-                    sources_list.append(domain)
+                    sources_list.append(urlparse(url).netloc.replace('www.', ''))
                     wordcloud_text += f" {final_title} {summary}"
                 else:
                     failed_articles.append((original_title, url))
         
         status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
 
-    if not results:
-        st.warning("Could not analyze any articles to generate a report.")
-        st.stop()
+    if not results and not google_mentions:
+        st.warning("No analyzable articles or mentions were found."); st.stop()
     
-    st.balloons()
+    if results: st.balloons()
     
     st.header("📊 Report at a Glance", divider='rainbow')
-    donut_fig = create_sentiment_donut_chart(sentiments_list)
-    bar_fig = create_source_bar_chart(sources_list)
-    wordcloud_img = create_word_cloud(wordcloud_text)
+    donut_fig, bar_fig, wordcloud_img = create_sentiment_donut_chart(sentiments_list), create_source_bar_chart(sources_list), create_word_cloud(wordcloud_text)
     
     viz_col1, viz_col2 = st.columns(2)
     with viz_col1:
         if donut_fig: st.plotly_chart(donut_fig, use_container_width=True)
     with viz_col2:
         if bar_fig: st.plotly_chart(bar_fig, use_container_width=True)
-
     if wordcloud_img:
-        st.subheader("Keyword Cloud")
-        st.image(wordcloud_img, use_column_width=True)
+        st.subheader("Keyword Cloud"); st.image(wordcloud_img, use_column_width=True)
 
     st.header("📄 Detailed Article Breakdown", divider='rainbow')
     report_text_content = f"News Report for {person_name} on {from_date.strftime('%A, %B %d, %Y')}\n" + "="*50 + "\n\n"
     
-    for i, (url, data) in enumerate(results.items(), 1):
-        with st.container(border=True):
-            st.subheader(f"{i}. {data.get('title', 'Title Not Found')}", anchor=False)
-            st.markdown(f"**Source:** [{url}]({url})")
-            st.info(f"**AI Summary:** {data['summary']}")
-            if "Positive" in data['sentiment']: st.success(f"**Sentiment:** {data['sentiment']}")
-            elif "Negative" in data['sentiment']: st.error(f"**Sentiment:** {data['sentiment']}")
-            else: st.warning(f"**Sentiment:** {data['sentiment']}")
+    if results:
+        report_text_content += "--- Analyzed Articles from NewsAPI ---\n\n"
+        for i, (url, data) in enumerate(results.items(), 1):
+            with st.container(border=True):
+                st.subheader(f"{i}. {data.get('title', 'Title Not Found')}", anchor=False); st.markdown(f"**Source:** [{url}]({url})")
+                st.info(f"**AI Summary:** {data['summary']}")
+                if "Positive" in data['sentiment']: st.success(f"**Sentiment:** {data['sentiment']}")
+                elif "Negative" in data['sentiment']: st.error(f"**Sentiment:** {data['sentiment']}")
+                else: st.warning(f"**Sentiment:** {data['sentiment']}")
+                if data['mentions']:
+                    with st.expander("Show mentions..."):
+                        for sent in data['mentions']: st.markdown(f'- "{sent}"')
+            report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n"
             if data['mentions']:
-                with st.expander("Show mentions..."):
-                    for sent in data['mentions']: st.markdown(f'- "{sent}"')
+                report_text_content += "   Mentions Found:\n"
+                for sent in data['mentions']: report_text_content += f'   - "{sent}"\n'
+                report_text_content += "\n"
+            else: report_text_content += "   Mentions Found: None\n\n"
+    
+    # --- RESTORED: Display unanalyzable articles on the webpage ---
+    if failed_articles:
+        st.subheader("Unanalyzable Articles from NewsAPI")
+        st.warning("These articles were found but were likely behind a paywall or blocked by the publisher:")
+        for title, url in failed_articles:
+            st.markdown(f"- **{title}** ([Source]({url}))")
+            
+    # --- RESTORED: Display Google News mentions on the webpage ---
+    if google_mentions:
+        st.subheader(f"Mentions Found on Google News")
+        st.info("Note: These links lead to Google and may require an extra click to reach the article. Analysis is not performed on these sources.")
+        for title, link in google_mentions:
+            st.markdown(f"- **{title}** ([Source]({link}))")
 
-        # Append to the string for the text report
-        report_text_content += f"{i}. {data.get('title', 'Title Not Found')}\n   URL: {url}\n\n   AI Summary: {data['summary']}\n\n   Sentiment Analysis: {data['sentiment']}\n\n"
-        if data['mentions']:
-            report_text_content += "   Mentions Found:\n"
-            for sent in data['mentions']:
-                report_text_content += f'   - "{sent}"\n'
-            report_text_content += "\n"
-        else:
-            report_text_content += "   Mentions Found: None\n\n"
-
-    # --- RESTORED: The logic to create and email the .txt report ---
+    # --- This is the email sending logic, which remains correct ---
     if recipient_email and (results or google_mentions or failed_articles):
         if failed_articles:
             report_text_content += "\n--- Unanalyzable Articles from NewsAPI ---\n(Note: These links were found but could not be read)\n\n"
-            for i, (title, url) in enumerate(failed_articles, 1):
-                report_text_content += f"{i}. {title}\n   Link: {url}\n\n"
-        
+            for i, (title, url) in enumerate(failed_articles, 1): report_text_content += f"{i}. {title}\n   Link: {url}\n\n"
         if google_mentions:
             report_text_content += "\n--- Additional Mentions Found on Google News ---\n(Note: These links were not analyzed)\n\n"
-            for i, (title, link) in enumerate(google_mentions, 1):
-                report_text_content += f"{i}. {title}\n   Link: {link}\n\n"
-
+            for i, (title, link) in enumerate(google_mentions, 1): report_text_content += f"{i}. {title}\n   Link: {link}\n\n"
         with st.spinner("Preparing and sending email report..."):
             output_filename = f"Report-{person_name.replace(' ','_')}-{from_date.strftime('%Y-%m-%d')}.txt"
-            with open(output_filename, "w", encoding='utf-8') as f:
-                f.write(report_text_content)
-            
+            with open(output_filename, "w", encoding='utf-8') as f: f.write(report_text_content)
             email_subject = f"News & Sentiment Report for {person_name} on {from_date.strftime('%Y-%m-%d')}"
             email_body = f"Hi,\n\nPlease find the attached comprehensive news report for {person_name}."
-            
             if send_email_with_attachment(email_subject, email_body, recipient_email, output_filename):
                 st.success(f"✅ Report sent to {recipient_email}!")
-            else:
-                st.error("Failed to send email.")
-            if os.path.exists(output_filename):
-                os.remove(output_filename)
+            else: st.error("Failed to send email.")
+            if os.path.exists(output_filename): os.remove(output_filename)
